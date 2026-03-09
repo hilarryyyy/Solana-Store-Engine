@@ -1,0 +1,63 @@
+# 🛒 Solana Store Engine - Technical Report
+
+Este documento detalla la implementación, arquitectura y protocolos de prueba para el smart contract `solana_store` desarrollado con el framework Anchor.
+
+---
+
+## 📝 Especificaciones del Programa
+- **Program ID:** `4Cr2gPGWSgaswj2YoYZN7n5Px7DU1t5doSiL3C2J8yoh`
+- **Lenguaje:** Rust (Anchor Framework)
+- **Red:** Solana Devnet / Localhost
+
+---
+
+## 🏗️ Arquitectura de Cuentas (State)
+El programa utiliza Program Derived Addresses (PDAs) para gestionar el inventario de forma descentralizada.
+
+### Cuenta: `Product`
+| Campo | Tipo | Tamaño (Bytes) | Descripción |
+| :--- | :--- | :--- | :--- |
+| **Discriminator** | `u8[8]` | 8 | Identificador de cuenta de Anchor. |
+| **Owner** | `Pubkey` | 32 | Dueño del producto (recibe los pagos). |
+| **Name** | `String` | 4 + N | Nombre del producto (Semilla de la PDA). |
+| **Price** | `u64` | 8 | Precio en lamports ($10^9 = 1$ SOL). |
+| **Stock** | `u32` | 4 | Unidades disponibles. |
+
+
+---
+
+## 🚀 Lógica de Instrucciones
+
+### 1. `create_product`
+Inicializa una nueva cuenta de producto en la cadena.
+- **Seeds:** `[b"product", seller_pubkey, product_name_bytes]`
+- **Cálculo de Espacio:** Reserva memoria dinámica según el tamaño del nombre para optimizar costos de renta.
+
+### 2. `purchase_product`
+Gestiona la venta atómica del producto.
+- **Validación de Stock:** Si el stock es 0, lanza el error `OutOfStock`.
+- **Transferencia (CPI):** Ejecuta una instrucción de transferencia del System Program del comprador al vendedor.
+- **Seguridad:** Verifica mediante un `constraint` que el `seller` sea efectivamente el `owner` guardado en la cuenta del producto.
+
+
+---
+
+## 🧪 Guía de Pruebas (Manual Testing)
+
+### Registrar Producto
+1. Configurar argumentos (Args): Nombre, Precio y Stock.
+2. En la cuenta `product`, seleccionar **Derive**.
+3. Ingresar las semillas: `"product"`, tu clave pública de wallet y el nombre exacto usado en Args.
+
+### Realizar Compra
+1. Pegar la dirección PDA del producto.
+2. Asegurarse de que el comprador (`buyer`) firme la transacción y tenga fondos suficientes.
+3. Validar que el `seller` sea la dirección que registró el producto.
+
+---
+
+## ⚠️ Manejo de Errores
+- **ErrorCode::OutOfStock (6000):** Se activa cuando no hay inventario disponible.
+
+---
+© 2024 Solana Store Engine - Inventory Decentralized System.
