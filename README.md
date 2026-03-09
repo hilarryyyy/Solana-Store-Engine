@@ -1,251 +1,61 @@
-# 🕯️ LUMEN — Decentralized Storefront on Solana
+# ⚡ SolQuest: The Proof of Hustle Protocol
 
-Un marketplace minimalista y completamente **on-chain** para gestionar productos digitales utilizando **Program Derived Addresses (PDAs)**.
+![Solana Banner](https://img.shields.io/badge/Network-Solana_Devnet-blueviolet?style=for-the-badge&logo=solana)
+![Anchor Version](https://img.shields.io/badge/Anchor-v0.30.1-blue?style=for-the-badge)
+![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
 
----
-
-# ✨ Descripción General
-
-LUMEN es un smart contract desarrollado con Anchor sobre la blockchain de Solana.  
-El proyecto demuestra cómo implementar un sistema **CRUD descentralizado** para administrar inventarios digitales directamente en la red.
-
-Cada producto se almacena como una **PDA única**, lo que garantiza:
-
-- Integridad de los datos
-- Propiedad verificable
-- Direcciones determinísticas
-- Eficiencia en costos de almacenamiento
+**SolQuest** es un protocolo de recompensas descentralizado construido en Solana que transforma la productividad en activos digitales. A través de un modelo de **Program Derived Addresses (PDAs)**, permite a los usuarios completar desafíos y recibir micro-pagos instantáneos en SOL y puntos de reputación on-chain.
 
 ---
 
-# 🧩 Características Principales
+### 🚀 Características Principales
 
-## 🛒 Registro de Productos
+* **Micro-Rewards Instantáneos:** Liquidación de recompensas en tiempo real tras la validación de la tarea.
+* **Reputación On-Chain:** Sistema de puntos (`UserStats`) que vive permanentemente en la blockchain.
+* **Arquitectura Escalable:** Uso de PDAs para garantizar que cada usuario y tarea tengan su propio espacio de almacenamiento eficiente.
+* **Seguridad Anchor:** Validaciones robustas para evitar dobles reclamos y accesos no autorizados.
 
-Los usuarios pueden registrar artículos con:
+---
 
-- Nombre (máximo 32 caracteres)
-- Precio en lamports
-- Estado de disponibilidad
-- Propietario (wallet creador)
+### 🛠️ Stack Tecnológico
 
-Cada producto se almacena en una PDA derivada de:
+* **Smart Contract:** Rust + [Anchor Framework](https://www.anchor-lang.com/)
+* **Frontend:** React + `@solana/web3.js` + `@solana/wallet-adapter`
+* **Testing:** Mocha & TypeScript
+* **Despliegue:** Solana Devnet
+
+---
+
+### 🏗️ Arquitectura de Cuentas (PDAs)
+
+El protocolo utiliza una estructura de cuentas optimizada para minimizar el costo de **Rent**:
+
+| Cuenta | Semillas (Seeds) | Propósito |
+| :--- | :--- | :--- |
+| **UserStats** | `["user-stats", user_pubkey]` | Guarda el progreso y puntos del usuario. |
+| **Task** | `["task", admin_pubkey, task_id]` | Define la recompensa y el estado de la tarea. |
+
+---
+
+### 📁 Fragmentos de Código Core (Rust)
 
 ```rust
-["item_v1", owner_pubkey, title]
-```
-
----
-
-## 🔄 Actualización Segura
-
-Solo el propietario del producto puede modificar sus datos.
-
-Las operaciones permitidas incluyen:
-
-- Cambiar el precio
-- Modificar la disponibilidad
-
-El contrato valida automáticamente la propiedad mediante:
-
-```rust
-has_one = owner
-```
-
----
-
-## 🗑️ Eliminación con Recuperación de Renta
-
-Cuando un producto se elimina:
-
-- La cuenta se cierra
-- La renta almacenada se devuelve al propietario
-- Se libera almacenamiento en la red
-
-Esto permite que el sistema sea **rent-neutral**.
-
----
-
-# 🏛️ Arquitectura del Programa
-
-## 📦 Modelo de Datos
-
-```rust
-StoreItem {
-    owner: Pubkey,
-    title: String,
-    price: u64,
-    is_available: bool,
-    bump: u8
+#[account]
+pub struct Task {
+    pub id: u64,
+    pub reward: u64,
+    pub is_completed: bool,
 }
-```
 
-Este modelo representa un producto dentro del marketplace.
+#[account]
+pub struct UserStats {
+    pub user: Pubkey,
+    pub tasks_completed: u64,
+    pub points: u64,
+}
 
----
-
-## 🧭 Contextos
-
-El programa utiliza tres contextos principales:
-
-```rust
-AddItem
-UpdateItem
-DeleteItem
-```
-
-### AddItem
-Inicializa una nueva PDA para el producto.
-
-### UpdateItem
-Permite modificar el precio y disponibilidad del producto.
-
-### DeleteItem
-Cierra la cuenta y devuelve la renta al propietario.
-
----
-
-# 🧱 Diseño Basado en PDAs
-
-Las Program Derived Addresses permiten:
-
-- Direcciones determinísticas
-- Seguridad sin claves privadas
-- Eliminación de índices globales
-- Escalabilidad
-
-La PDA de cada producto se deriva de:
-
-```rust
-["item_v1", owner_pubkey, title]
-```
-
----
-
-# 🔐 Seguridad y Buenas Prácticas
-
-El contrato implementa varias validaciones:
-
-### Validación de Propietario
-
-Solo el creador del producto puede modificarlo o eliminarlo.
-
-### Validación de Entradas
-
-```rust
-title length: 1 - 32 characters
-price > 0
-```
-
-### Gestión de Seeds
-
-Las seeds garantizan integridad y evitan colisiones de direcciones.
-
-### Cierre Seguro de Cuentas
-
-```rust
-close = owner
-```
-
-Esto devuelve automáticamente la renta al propietario.
-
----
-
-# ⚡ Eficiencia y Costos
-
-LUMEN no utiliza listas globales de productos.
-
-Cada producto es independiente y vive en su propia cuenta PDA.
-
-Ventajas:
-
-- menor uso de almacenamiento
-- menor costo computacional
-- recuperación de renta al eliminar productos
-
----
-
-# 🧪 Pruebas
-
-El proyecto incluye pruebas automatizadas con:
-
-```
-TypeScript
-Mocha
-Chai
-```
-
-Las pruebas verifican:
-
-- Creación de productos
-- Persistencia de datos
-- Actualización de precio
-- Validación de permisos
-- Eliminación y recuperación de renta
-
----
-
-# 🚀 Cómo Ejecutarlo Localmente
-
-## Requisitos
-
-```
-Solana CLI 1.18.x
-Anchor 0.30.x
-Node.js 20.x
-Yarn
-```
-
----
-
-## Instalación
-
-```bash
-yarn install
-```
-
----
-
-## Compilar el programa
-
-```bash
-anchor build
-```
-
----
-
-## Ejecutar pruebas
-
-```bash
-anchor test
-```
-
----
-
-# 📂 Estructura del Repositorio
-
-```
-LUMEN/
-├── programs/
-│   └── lumen/
-│       └── src/
-│           └── lib.rs
-├── tests/
-│   └── anchor.test.ts
-├── migrations/
-│   └── deploy.ts
-├── Anchor.toml
-└── README.md
-```
-
----
-
-# 🎯 Objetivo del Proyecto
-
-LUMEN demuestra cómo construir un smart contract limpio, seguro y escalable en Solana utilizando Anchor.
-
-El proyecto sirve como:
-
-- ejemplo educativo
-- base para marketplaces descentralizados
-- demostración de uso de PDAs en sistemas CRUD
+#[error_code]
+pub enum TaskError {
+    #[msg("Esta tarea ya ha sido completada.")]
+    AlreadyCompleted,
+}
