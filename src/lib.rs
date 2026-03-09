@@ -1,163 +1,141 @@
 use anchor_lang::prelude::*;
 
-declare_id!("hpGG7v5Y5XFtT96thymVC9sAxUNUGPHygjuzgoTcFp3");
+declare_id!("8Csv9Td8dR8xGYfFWGWeMewsGsMVokgiuLrisEU57LRB");
 
 #[program]
-pub mod lumen {
+pub mod task_rewards {
     use super::*;
 
-    /// Crea un nuevo producto en la tienda virtual.
-    /// Cada producto se almacena en una PDA única basada en:
-    ///   - "item_v1"
-    ///   - owner_pubkey
-    ///   - título del producto
-    pub fn add_item(ctx: Context<AddItem>, title: String, price: u64) -> Result<()> {
-        // Validaciones de entrada
-        require!(title.len() > 0 && title.len() <= 32, LumenError::InvalidTitleLength);
-        require!(price > 0, LumenError::InvalidPrice);
+    //Inicializar el perfil del usuario
+    pub fn initialize_user(ctx: Context<InitializeUser>) -> Result<()> {
+        let user_stats = &mut ctx.accounts.user_stats;
 
-        let item = &mut ctx.accounts.store_item;
+        user_stats.user = ctx.accounts.authority.key();
+        user_stats.tasks_completed = 0;
+        user_stats.points = 0;
 
-        item.owner = *ctx.accounts.owner.key;
-        item.title = title;
-        item.price = price;
-        item.is_available = true;
-        item.bump = ctx.bumps.store_item;
-
-        msg!("LUMEN: Producto '{}' registrado exitosamente.", item.title);
+        msg!("Perfil de usuario creado para: {}", user_stats.user);
         Ok(())
     }
 
-    /// Actualiza el precio y la disponibilidad de un producto.
-    /// El sistema valida automáticamente que el `owner` sea el dueño real.
-    pub fn update_item(
-        ctx: Context<UpdateItem>,
-        price: u64,
-        is_available: bool,
+    //Crear una tarea
+    pub fn create_task(
+        ctx: Context<CreateTask>,
+        task_id: u64,
+        reward_amount: u64,
     ) -> Result<()> {
-        require!(price > 0, LumenError::InvalidPrice);
+        let task = &mut ctx.accounts.task;
 
-        let item = &mut ctx.accounts.store_item;
-
-        item.price = price;
-        item.is_available = is_available;
-
-        msg!("LUMEN: Producto '{}' actualizado correctamente.", item.title);
-        Ok(())
-    }
-
-    /// Elimina un producto y devuelve la renta (SOL) al propietario.
-    pub fn delete_item(ctx: Context<DeleteItem>) -> Result<()> {
-        let item = &ctx.accounts.store_item;
+        task.id = task_id;
+        task.reward = reward_amount;
+        task.is_completed = false;
 
         msg!(
-            "LUMEN: Producto '{}' eliminado. Renta devuelta al propietario {}.",
-            item.title,
-            item.owner
+            "Tarea {} creada con recompensa de {} lamports",
+            task_id,
+            reward_amount
+        );
+
+        Ok(())
+    }
+
+    // Completar tarea y recibir recompensa
+    pub fn complete_task(ctx: Context<CompleteTask>) -> Result<()> {
+        let task = &mut ctx.accounts.task;
+        let user_stats = &mut ctx.accounts.user_stats;
+
+        require!(!task.is_completed, TaskError::AlreadyCompleted);
+
+        let amount = task.reward;
+
+        // Transferir lamports desde la cuenta de la tarea al usuario
+        **task.to_account_info().try_borrow_mut_lamports()? -= amount;
+        **ctx.accounts
+            .authority
+            .to_account_info()
+            .try_borrow_mut_lamports()? += amount;
+
+        // Actualizar estado
+        task.is_completed = true;
+        user_stats.tasks_completed += 1;
+        user_stats.points += 100;
+
+        msg!(
+            "¡Tarea completada! Usuario recibió {} lamports y 100 puntos",
+            amount
         );
 
         Ok(())
     }
 }
 
-/* -------------------------------------------------------------------------- */
-/*                               MODELO DE DATOS                              */
-/* -------------------------------------------------------------------------- */
-
-#[account]
-pub struct StoreItem {
-    pub owner: Pubkey,      // Dueño del producto
-    pub title: String,      // Nombre del producto
-    pub price: u64,         // Precio en lamports
-    pub is_available: bool, // Disponibilidad
-    pub bump: u8,           // Bump de la PDA
-}
-
-impl StoreItem {
-    // Cálculo del espacio necesario para la cuenta
-    // 8  -> Discriminador
-    // 32 -> Pubkey
-    // 4 + 32 -> String (máx 32 chars)
-    // 8  -> u64
-    // 1  -> bool
-    // 1  -> u8
-    pub const LEN: usize = 8 + 32 + 36 + 8 + 1 + 1;
-}
-
-/* -------------------------------------------------------------------------- */
-/*                               CONTEXTOS (PDAs)                             */
-/* -------------------------------------------------------------------------- */
-
 #[derive(Accounts)]
-#[instruction(title: String)]
-pub struct AddItem<'info> {
+#[instruction(task_id: u64)]
+pub struct CreateTask<'info> {
     #[account(
         init,
-        payer = owner,
-        space = StoreItem::LEN,
-        seeds = [
-            b"item_v1",
-            owner.key().as_ref(),
-            title.as_bytes()
-        ],
+        payer = authority,
+        space = 8 + 8 + 8 + 1,
+        seeds = [b"task", authority.key().as_ref(), task_id.to_le_bytes().as_ref()],
         bump
     )]
-    pub store_item: Account<'info, StoreItem>,
+    pub task: Account<'info, Task>,
 
     #[account(mut)]
-    pub owner: Signer<'info>,
+    pub authority: Signer<'info>,
 
     pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
-pub struct UpdateItem<'info> {
+pub struct InitializeUser<'info> {
     #[account(
-        mut,
-        has_one = owner @ LumenError::Unauthorized,
-        seeds = [
-            b"item_v1",
-            owner.key().as_ref(),
-            store_item.title.as_bytes()
-        ],
-        bump = store_item.bump
+        init,
+        payer = authority,
+        space = 8 + 32 + 8 + 8,
+        seeds = [b"user-stats", authority.key().as_ref()],
+        bump
     )]
-    pub store_item: Account<'info, StoreItem>,
+    pub user_stats: Account<'info, UserStats>,
 
-    pub owner: Signer<'info>,
+    #[account(mut)]
+    pub authority: Signer<'info>,
+
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
-pub struct DeleteItem<'info> {
+pub struct CompleteTask<'info> {
+    #[account(mut)]
+    pub task: Account<'info, Task>,
+
     #[account(
         mut,
-        close = owner,
-        has_one = owner @ LumenError::Unauthorized,
-        seeds = [
-            b"item_v1",
-            owner.key().as_ref(),
-            store_item.title.as_bytes()
-        ],
-        bump = store_item.bump
+        seeds = [b"user-stats", authority.key().as_ref()],
+        bump
     )]
-    pub store_item: Account<'info, StoreItem>,
+    pub user_stats: Account<'info, UserStats>,
 
     #[account(mut)]
-    pub owner: Signer<'info>,
+    pub authority: Signer<'info>,
 }
 
-/* -------------------------------------------------------------------------- */
-/*                                   ERRORES                                  */
-/* -------------------------------------------------------------------------- */
+#[account]
+pub struct Task {
+    pub id: u64,
+    pub reward: u64,
+    pub is_completed: bool,
+}
+
+#[account]
+pub struct UserStats {
+    pub user: Pubkey,
+    pub tasks_completed: u64,
+    pub points: u64,
+}
 
 #[error_code]
-pub enum LumenError {
-    #[msg("No tienes permisos para modificar este producto.")]
-    Unauthorized,
-
-    #[msg("El título debe tener entre 1 y 32 caracteres.")]
-    InvalidTitleLength,
-
-    #[msg("El precio debe ser mayor a 0.")]
-    InvalidPrice,
+pub enum TaskError {
+    #[msg("Esta tarea ya ha sido completada.")]
+    AlreadyCompleted,
 }
