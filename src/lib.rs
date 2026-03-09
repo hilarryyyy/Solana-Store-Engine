@@ -1,141 +1,89 @@
 use anchor_lang::prelude::*;
 
-declare_id!("8Csv9Td8dR8xGYfFWGWeMewsGsMVokgiuLrisEU57LRB");
+declare_id!("4Cr2gPGWSgaswj2YoYZN7n5Px7DU1t5doSiL3C2J8yoh"); 
 
 #[program]
-pub mod task_rewards {
+pub mod solana_store {
     use super::*;
 
-    //Inicializar el perfil del usuario
-    pub fn initialize_user(ctx: Context<InitializeUser>) -> Result<()> {
-        let user_stats = &mut ctx.accounts.user_stats;
-
-        user_stats.user = ctx.accounts.authority.key();
-        user_stats.tasks_completed = 0;
-        user_stats.points = 0;
-
-        msg!("Perfil de usuario creado para: {}", user_stats.user);
+    // 1. Registrar un producto nuevo
+    pub fn create_product(ctx: Context<CreateProduct>, name: String, price: u64, stock: u32) -> Result<()> {
+        let product = &mut ctx.accounts.product;
+        product.owner = *ctx.accounts.seller.key;
+        product.name = name;
+        product.price = price;
+        product.stock = stock;
+        
+        msg!("Producto creado: {} con stock de {}", product.name, product.stock);
         Ok(())
     }
 
-    //Crear una tarea
-    pub fn create_task(
-        ctx: Context<CreateTask>,
-        task_id: u64,
-        reward_amount: u64,
-    ) -> Result<()> {
-        let task = &mut ctx.accounts.task;
+    // 2. Comprar un producto (Reduce stock y transfiere SOL)
+    pub fn purchase_product(ctx: Context<PurchaseProduct>) -> Result<()> {
+        let product = &mut ctx.accounts.product;
 
-        task.id = task_id;
-        task.reward = reward_amount;
-        task.is_completed = false;
+        // Verificamos que haya stock
+        if product.stock == 0 {
+            return err!(ErrorCode::OutOfStock);
+        }
 
-        msg!(
-            "Tarea {} creada con recompensa de {} lamports",
-            task_id,
-            reward_amount
-        );
+        // Transferencia de SOL del comprador al vendedor
+        let cpi_context = Box::new(anchor_lang::system_program::Transfer {
+            from: ctx.accounts.buyer.to_account_info(),
+            to: ctx.accounts.seller.to_account_info(),
+        });
+        
+        anchor_lang::system_program::transfer(
+            CpiContext::new(ctx.accounts.system_program.to_account_info(), *cpi_context),
+            product.price,
+        )?;
 
-        Ok(())
-    }
-
-    // Completar tarea y recibir recompensa
-    pub fn complete_task(ctx: Context<CompleteTask>) -> Result<()> {
-        let task = &mut ctx.accounts.task;
-        let user_stats = &mut ctx.accounts.user_stats;
-
-        require!(!task.is_completed, TaskError::AlreadyCompleted);
-
-        let amount = task.reward;
-
-        // Transferir lamports desde la cuenta de la tarea al usuario
-        **task.to_account_info().try_borrow_mut_lamports()? -= amount;
-        **ctx.accounts
-            .authority
-            .to_account_info()
-            .try_borrow_mut_lamports()? += amount;
-
-        // Actualizar estado
-        task.is_completed = true;
-        user_stats.tasks_completed += 1;
-        user_stats.points += 100;
-
-        msg!(
-            "¡Tarea completada! Usuario recibió {} lamports y 100 puntos",
-            amount
-        );
-
+        // Reducimos el stock
+        product.stock -= 1;
+        
+        msg!("Compra exitosa. Stock restante: {}", product.stock);
         Ok(())
     }
 }
 
+#[account]
+pub struct Product {
+    pub owner: Pubkey,   // 32 bytes
+    pub name: String,    // 4 bytes prefijo + caracteres
+    pub price: u64,      // 8 bytes (en lamports)
+    pub stock: u32,      // 4 bytes
+}
+
 #[derive(Accounts)]
-#[instruction(task_id: u64)]
-pub struct CreateTask<'info> {
+#[instruction(name: String)]
+pub struct CreateProduct<'info> {
     #[account(
-        init,
-        payer = authority,
-        space = 8 + 8 + 8 + 1,
-        seeds = [b"task", authority.key().as_ref(), task_id.to_le_bytes().as_ref()],
+        init, 
+        payer = seller, 
+        space = 8 + 32 + (4 + name.len()) + 8 + 4,
+        seeds = [b"product", seller.key().as_ref(), name.as_bytes()],
         bump
     )]
-    pub task: Account<'info, Task>,
-
+    pub product: Account<'info, Product>,
     #[account(mut)]
-    pub authority: Signer<'info>,
-
+    pub seller: Signer<'info>,
     pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
-pub struct InitializeUser<'info> {
-    #[account(
-        init,
-        payer = authority,
-        space = 8 + 32 + 8 + 8,
-        seeds = [b"user-stats", authority.key().as_ref()],
-        bump
-    )]
-    pub user_stats: Account<'info, UserStats>,
-
+pub struct PurchaseProduct<'info> {
     #[account(mut)]
-    pub authority: Signer<'info>,
-
+    pub product: Account<'info, Product>,
+    #[account(mut)]
+    pub buyer: Signer<'info>,
+    /// CHECK: Esta es la cuenta que recibe el dinero (el dueño del producto)
+    #[account(mut, constraint = seller.key() == product.owner)]
+    pub seller: AccountInfo<'info>,
     pub system_program: Program<'info, System>,
-}
-
-#[derive(Accounts)]
-pub struct CompleteTask<'info> {
-    #[account(mut)]
-    pub task: Account<'info, Task>,
-
-    #[account(
-        mut,
-        seeds = [b"user-stats", authority.key().as_ref()],
-        bump
-    )]
-    pub user_stats: Account<'info, UserStats>,
-
-    #[account(mut)]
-    pub authority: Signer<'info>,
-}
-
-#[account]
-pub struct Task {
-    pub id: u64,
-    pub reward: u64,
-    pub is_completed: bool,
-}
-
-#[account]
-pub struct UserStats {
-    pub user: Pubkey,
-    pub tasks_completed: u64,
-    pub points: u64,
 }
 
 #[error_code]
-pub enum TaskError {
-    #[msg("Esta tarea ya ha sido completada.")]
-    AlreadyCompleted,
+pub enum ErrorCode {
+    #[msg("No quedan unidades disponibles de este producto.")]
+    OutOfStock,
 }
